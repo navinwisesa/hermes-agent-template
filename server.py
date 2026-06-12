@@ -1491,6 +1491,9 @@ routes = [
     # /setup/* typos return a real 404 — not a silent proxy fallthrough.
     Route("/setup/{path:path}",                 route_setup_404,     methods=ANY_METHOD),
 
+    Route("/setup/api/auth/google",          api_google_login,      methods=["GET"]),
+    Route("/auth/callback",                  auth_callback,         methods=["GET"]),
+
     # Reverse-proxy hermes's dashboard WebSockets (Chat tab + sidecar).
     # WebSocketRoute is matched independently of HTTP routes, so order
     # relative to the catch-all HTTP `Route("/{path:path}", ...)` below
