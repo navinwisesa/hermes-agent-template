@@ -63,6 +63,20 @@ ENV_FILE = Path(HERMES_HOME) / ".env"
 PAIRING_DIR = Path(HERMES_HOME) / "pairing"
 PAIRING_TTL = 3600
 
+# Google OAuth credentials — set these as Railway environment variables.
+GOOGLE_CLIENT_ID     = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI  = os.environ.get("GOOGLE_REDIRECT_URI", "/auth/callback")
+# Scopes Kosha needs: calendar (read), tasks (read), gmail (read metadata).
+GOOGLE_SCOPES = " ".join([
+    "openid",
+    "email",
+    "profile",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/tasks.readonly",
+    "https://www.googleapis.com/auth/gmail.metadata",
+])
+
 # Native Hermes dashboard — runs on loopback, fronted by our reverse proxy.
 HERMES_DASHBOARD_HOST = "127.0.0.1"
 HERMES_DASHBOARD_PORT = int(os.environ.get("HERMES_DASHBOARD_PORT", "9119"))
@@ -422,7 +436,32 @@ def _save_auth_json(provider, tokens):
     with open(AUTH_FILE_PATH, 'w') as f:
         json.dump(data, f, indent=2)
 
-async def auth_callback(request):
+async def api_google_login(request: Request) -> Response:
+    """Initiate Google OAuth flow: generate state, store in session, redirect to Google."""
+    if not GOOGLE_CLIENT_ID:
+        return JSONResponse(
+            {"error": "GOOGLE_CLIENT_ID is not configured. Set it as a Railway environment variable."},
+            status_code=500,
+        )
+
+    state = secrets.token_urlsafe(32)
+    request.session["oauth_state"] = state
+
+    params = {
+        "client_id":     GOOGLE_CLIENT_ID,
+        "redirect_uri":  GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope":         GOOGLE_SCOPES,
+        "state":         state,
+        "access_type":   "offline",   # request a refresh token
+        "prompt":        "consent",   # always show consent so refresh_token is returned
+    }
+    from urllib.parse import urlencode
+    google_auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
+    return RedirectResponse(url=google_auth_url)
+
+
+async def auth_callback(request: Request) -> Response:
     code = request.query_params.get("code")
     state = request.query_params.get("state")
     
@@ -436,7 +475,7 @@ async def auth_callback(request):
             "code": code,
             "client_id": GOOGLE_CLIENT_ID,
             "client_secret": GOOGLE_CLIENT_SECRET,
-            "redirect_uri": "https://your-domain.com/auth/callback",
+            "redirect_uri": GOOGLE_REDIRECT_URI,
             "grant_type": "authorization_code"
         })
         tokens = response.json()
@@ -1496,11 +1535,12 @@ routes = [
     Route("/setup/api/oauth/xai/status",        api_oauth_xai_status),
     Route("/setup/api/oauth/xai",               api_oauth_xai_delete, methods=["DELETE"]),
 
+    # Google OAuth — login initiation and callback.
+    Route("/setup/api/auth/google",             api_google_login,     methods=["GET"]),
+    Route("/auth/callback",                     auth_callback,        methods=["GET"]),
+
     # /setup/* typos return a real 404 — not a silent proxy fallthrough.
     Route("/setup/{path:path}",                 route_setup_404,     methods=ANY_METHOD),
-
-    Route("/setup/api/auth/google",          api_google_login,      methods=["GET"]),
-    Route("/auth/callback",                  auth_callback,         methods=["GET"]),
 
     # Reverse-proxy hermes's dashboard WebSockets (Chat tab + sidecar).
     # WebSocketRoute is matched independently of HTTP routes, so order
