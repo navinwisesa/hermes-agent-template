@@ -401,6 +401,42 @@ def _apply_xai_oauth_config(model: str) -> None:
         existing_env["LLM_MODEL"] = model
         existing_env["_MODEL_XAI_OAUTH"] = model
         write_env(ENV_FILE, existing_env)
+      
+def _save_auth_json(provider, tokens):
+    # Load existing auth.json or initialize
+    auth_data = _load_auth_json() 
+    auth_data[provider] = {
+        "tokens": tokens,
+        "updated_at": datetime.utcnow().isoformat()
+    }
+    # Write to disk to ensure persistence across Railway restarts
+    with open(AUTH_FILE_PATH, 'w') as f:
+        json.dump(auth_data, f)
+
+
+async def auth_callback(request):
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    
+    # 1. Validate the state to prevent CSRF
+    if not state or state != request.session.get("oauth_state"):
+        return PlainTextResponse("Invalid state", status_code=400)
+    
+    # 2. Exchange code for tokens
+    async with httpx.AsyncClient() as client:
+        response = await client.post("https://oauth2.googleapis.com/token", data={
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": "https://your-domain.com/auth/callback",
+            "grant_type": "authorization_code"
+        })
+        tokens = response.json()
+    
+    # 3. Save tokens using your established pattern
+    _save_auth_json("google", tokens)
+    
+    return RedirectResponse(url="/setup")
 
 
 async def _poll_xai_device_auth(state: dict) -> None:
