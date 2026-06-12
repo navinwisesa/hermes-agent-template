@@ -43,6 +43,7 @@ import httpx
 import websockets
 import websockets.exceptions
 from starlette.applications import Starlette
+from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
 from starlette.responses import (
     HTMLResponse,
@@ -1567,6 +1568,12 @@ routes = [
 # No middleware — auth is enforced per-handler via guard(). This keeps /health
 # and /login truly unauthenticated without middleware gymnastics.
 app = Starlette(routes=routes, lifespan=lifespan)
+
+# SessionMiddleware is required for request.session (used by Google OAuth CSRF state).
+# Uses ADMIN_PASSWORD as the signing secret so it rotates with redeploys, which also
+# invalidates any in-flight OAuth sessions — acceptable for a single-user deployment.
+_session_secret = os.environ.get("SESSION_SECRET") or os.environ.get("ADMIN_PASSWORD") or secrets.token_hex(32)
+app.add_middleware(SessionMiddleware, secret_key=_session_secret, https_only=True, same_site="lax")
 
 if __name__ == "__main__":
     import uvicorn
