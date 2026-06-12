@@ -57,7 +57,8 @@ from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
-HERMES_HOME = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
+HERMES_HOME = os.environ.get("HERMES_HOME", "/data")
+AUTH_FILE_PATH = Path(HERMES_HOME) / "auth.json"
 ENV_FILE = Path(HERMES_HOME) / ".env"
 PAIRING_DIR = Path(HERMES_HOME) / "pairing"
 PAIRING_TTL = 3600
@@ -403,16 +404,23 @@ def _apply_xai_oauth_config(model: str) -> None:
         write_env(ENV_FILE, existing_env)
       
 def _save_auth_json(provider, tokens):
-    # Load existing auth.json or initialize
-    auth_data = _load_auth_json() 
-    auth_data[provider] = {
-        "tokens": tokens,
-        "updated_at": datetime.utcnow().isoformat()
-    }
-    # Write to disk to ensure persistence across Railway restarts
+    """Saves tokens to the persistent /data/auth.json file."""
+    # Ensure directory exists
+    Path(HERMES_HOME).mkdir(parents=True, exist_ok=True)
+    
+    # Load existing or create new
+    if AUTH_FILE_PATH.exists():
+        with open(AUTH_FILE_PATH, 'r') as f:
+            data = json.load(f)
+    else:
+        data = {}
+        
+    # Update with new tokens
+    data[provider] = tokens
+    
+    # Write back to file
     with open(AUTH_FILE_PATH, 'w') as f:
-        json.dump(auth_data, f)
-
+        json.dump(data, f, indent=2)
 
 async def auth_callback(request):
     code = request.query_params.get("code")
