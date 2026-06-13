@@ -455,6 +455,34 @@ def get_user_tokens(google_id: str) -> dict | None:
     return data.get("google")
 
 
+def _save_google_token(google_id: str, tokens: dict) -> None:
+    """Write google_token.json in the format the google-workspace skill expects.
+
+    The skill reads:  ${HERMES_HOME}/skills/productivity/google-workspace/scripts/google_token.json
+    but when we set HERMES_HOME=/data/users/<google_id> per user, it becomes:
+        /data/users/<google_id>/skills/productivity/google-workspace/scripts/google_token.json
+
+    Format mirrors what setup.py produces after a successful OAuth exchange.
+    """
+    skill_dir = (
+        Path(HERMES_HOME) / "users" / google_id
+        / "skills" / "productivity" / "google-workspace" / "scripts"
+    )
+    skill_dir.mkdir(parents=True, exist_ok=True)
+
+    google_token = {
+        "token":         tokens.get("access_token", ""),
+        "refresh_token": tokens.get("refresh_token", ""),
+        "token_uri":     "https://oauth2.googleapis.com/token",
+        "client_id":     GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "scopes":        GOOGLE_SCOPES.split(),
+        "expiry":        tokens.get("expires_in", 3600),
+    }
+    with open(skill_dir / "google_token.json", "w") as f:
+        json.dump(google_token, f, indent=2)
+
+
 async def api_google_login(request: Request) -> Response:
     """Initiate Google OAuth flow: generate state, store in session, redirect to Google."""
     if not GOOGLE_CLIENT_ID:
@@ -520,16 +548,49 @@ async def auth_callback(request: Request) -> Response:
         return PlainTextResponse("Could not retrieve Google user ID.", status_code=500)
 
     # 4. Persist the tokens keyed by the user's Google ID.
-    #    /data/users/<google_id>/auth.json  — survives redeploys via the Railway volume.
+    #    /data/users/<google_id>/auth.json       — our internal store
+    #    /data/users/<google_id>/skills/.../google_token.json — what the skill reads
     tokens["email"] = profile.get("email", "")
     tokens["name"]  = profile.get("name", "")
     _save_user_tokens(google_id, tokens)
+    _save_google_token(google_id, tokens)
 
     # 5. Store google_id in the session so the agent knows who this browser belongs to.
     request.session["google_id"] = google_id
     request.session.pop("oauth_state", None)
 
-    return RedirectResponse(url="/setup")
+    # 6. Show a confirmation page so the user knows it worked and can return to chat.
+    email    = profile.get("email", "your Google account")
+    name     = profile.get("name", "")
+    greeting = ("Hi " + name + "! ") if name else ""
+
+    html = (
+        "<!DOCTYPE html>"
+        "<html lang='en'><head>"
+        "<meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Google connected — Kosha</title>"
+        "<style>"
+        "body{font-family:system-ui,sans-serif;background:#0f1117;color:#e2e8f0;"
+        "display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}"
+        ".card{background:#1a1f2e;border:1px solid #2d3748;border-radius:12px;"
+        "padding:2.5rem 3rem;max-width:420px;text-align:center}"
+        ".check{font-size:3rem;margin-bottom:1rem}"
+        "h1{font-size:1.4rem;font-weight:600;margin:0 0 0.5rem;color:#fff}"
+        "p{color:#94a3b8;margin:0 0 1.5rem;font-size:0.95rem;line-height:1.6}"
+        "a{display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;"
+        "border-radius:8px;padding:0.65rem 1.5rem;font-size:0.95rem;font-weight:500}"
+        "a:hover{background:#4338ca}"
+        "</style></head><body>"
+        "<div class='card'>"
+        "<div class='check'>&#10003;</div>"
+        "<h1>Google connected</h1>"
+        f"<p>{greeting}Kosha can now read your Calendar, Tasks, and Gmail"
+        f" for <strong>{email}</strong>.</p>"
+        "<a href='/chat'>Return to chat &#8594;</a>"
+        "</div></body></html>"
+    )
+    return HTMLResponse(html)
 
 
 async def _poll_xai_device_auth(state: dict) -> None:
