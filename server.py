@@ -419,23 +419,41 @@ def _apply_xai_oauth_config(model: str) -> None:
         write_env(ENV_FILE, existing_env)
       
 def _save_auth_json(provider, tokens):
-    """Saves tokens to the persistent /data/auth.json file."""
-    # Ensure directory exists
+    """Saves tokens to the persistent /data/auth.json file (single-user fallback)."""
     Path(HERMES_HOME).mkdir(parents=True, exist_ok=True)
-    
-    # Load existing or create new
     if AUTH_FILE_PATH.exists():
-        with open(AUTH_FILE_PATH, 'r') as f:
+        with open(AUTH_FILE_PATH, "r") as f:
             data = json.load(f)
     else:
         data = {}
-        
-    # Update with new tokens
     data[provider] = tokens
-    
-    # Write back to file
-    with open(AUTH_FILE_PATH, 'w') as f:
+    with open(AUTH_FILE_PATH, "w") as f:
         json.dump(data, f, indent=2)
+
+
+def _save_user_tokens(google_id: str, tokens: dict) -> None:
+    """Save a user's Google tokens to /data/users/<google_id>/auth.json."""
+    user_dir = Path(HERMES_HOME) / "users" / google_id
+    user_dir.mkdir(parents=True, exist_ok=True)
+    auth_path = user_dir / "auth.json"
+    existing = {}
+    if auth_path.exists():
+        with open(auth_path) as f:
+            existing = json.load(f)
+    existing["google"] = tokens
+    with open(auth_path, "w") as f:
+        json.dump(existing, f, indent=2)
+
+
+def get_user_tokens(google_id: str) -> dict | None:
+    """Load a user's Google tokens. Returns None if not found."""
+    auth_path = Path(HERMES_HOME) / "users" / google_id / "auth.json"
+    if not auth_path.exists():
+        return None
+    with open(auth_path) as f:
+        data = json.load(f)
+    return data.get("google")
+
 
 async def api_google_login(request: Request) -> Response:
     """Initiate Google OAuth flow: generate state, store in session, redirect to Google."""
@@ -463,27 +481,54 @@ async def api_google_login(request: Request) -> Response:
 
 
 async def auth_callback(request: Request) -> Response:
-    code = request.query_params.get("code")
+    code  = request.query_params.get("code")
     state = request.query_params.get("state")
-    
-    # 1. Validate the state to prevent CSRF
+
+    # 1. Validate CSRF state.
     if not state or state != request.session.get("oauth_state"):
-        return PlainTextResponse("Invalid state", status_code=400)
-    
-    # 2. Exchange code for tokens
+        return PlainTextResponse("Invalid state parameter.", status_code=400)
+
     async with httpx.AsyncClient() as client:
-        response = await client.post("https://oauth2.googleapis.com/token", data={
-            "code": code,
-            "client_id": GOOGLE_CLIENT_ID,
-            "client_secret": GOOGLE_CLIENT_SECRET,
-            "redirect_uri": GOOGLE_REDIRECT_URI,
-            "grant_type": "authorization_code"
-        })
-        tokens = response.json()
-    
-    # 3. Save tokens using your established pattern
-    _save_auth_json("google", tokens)
-    
+        # 2. Exchange the authorisation code for tokens.
+        token_resp = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code":          code,
+                "client_id":     GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uri":  GOOGLE_REDIRECT_URI,
+                "grant_type":    "authorization_code",
+            },
+        )
+        tokens = token_resp.json()
+
+        if "error" in tokens:
+            return PlainTextResponse(
+                f"Token exchange failed: {tokens.get('error_description', tokens['error'])}",
+                status_code=400,
+            )
+
+        # 3. Fetch the user's Google profile to get their stable unique ID.
+        profile_resp = await client.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        profile = profile_resp.json()
+
+    google_id = profile.get("sub")  # "sub" is the permanent unique Google user ID.
+    if not google_id:
+        return PlainTextResponse("Could not retrieve Google user ID.", status_code=500)
+
+    # 4. Persist the tokens keyed by the user's Google ID.
+    #    /data/users/<google_id>/auth.json  — survives redeploys via the Railway volume.
+    tokens["email"] = profile.get("email", "")
+    tokens["name"]  = profile.get("name", "")
+    _save_user_tokens(google_id, tokens)
+
+    # 5. Store google_id in the session so the agent knows who this browser belongs to.
+    request.session["google_id"] = google_id
+    request.session.pop("oauth_state", None)
+
     return RedirectResponse(url="/setup")
 
 
