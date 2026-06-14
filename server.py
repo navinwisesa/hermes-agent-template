@@ -75,7 +75,7 @@ GOOGLE_SCOPES = " ".join([
     "profile",
     "https://www.googleapis.com/auth/calendar.readonly",
     "https://www.googleapis.com/auth/tasks.readonly",
-    "https://www.googleapis.com/auth/gmail.metadata",
+    "https://www.googleapis.com/auth/gmail.readonly",
 ])
 
 # Native Hermes dashboard — runs on loopback, fronted by our reverse proxy.
