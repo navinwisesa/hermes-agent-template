@@ -512,6 +512,15 @@ def _save_google_token(google_id: str, tokens: dict) -> None:
         with open(skill_dir / "google_client_secret.json", "w") as f:
             json.dump(client_secret, f, indent=2)
 
+    # setup.py --check looks for the token here: /data/.hermes/google_token.json
+    # Write it to that flat root location as well.
+    hermes_root = Path(HERMES_HOME) / ".hermes"
+    hermes_root.mkdir(parents=True, exist_ok=True)
+    with open(hermes_root / "google_token.json", "w") as f:
+        json.dump(google_token, f, indent=2)
+    with open(hermes_root / "google_client_secret.json", "w") as f:
+        json.dump(client_secret, f, indent=2)
+
 
 async def api_google_login(request: Request) -> Response:
     """Initiate Google OAuth flow: generate state, store in session, redirect to Google."""
