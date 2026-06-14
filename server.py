@@ -29,6 +29,7 @@ injected into every proxied HTML response so users can always return to the wiza
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import os
 import re
