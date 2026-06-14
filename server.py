@@ -456,20 +456,33 @@ def get_user_tokens(google_id: str) -> dict | None:
 
 
 def _save_google_token(google_id: str, tokens: dict) -> None:
-    """Write google_token.json in the format the google-workspace skill expects.
+    """Write google_token.json and google_client_secret.json where the skill expects them.
 
-    The skill reads:  ${HERMES_HOME}/skills/productivity/google-workspace/scripts/google_token.json
-    but when we set HERMES_HOME=/data/users/<google_id> per user, it becomes:
-        /data/users/<google_id>/skills/productivity/google-workspace/scripts/google_token.json
+    Hermes installs itself at /data/.hermes (dotfile), so the skill scripts live at:
+        /data/.hermes/skills/productivity/google-workspace/scripts/
 
-    Format mirrors what setup.py produces after a successful OAuth exchange.
+    The skill's setup.py --check requires two files in that directory:
+        - google_token.json        : the OAuth access/refresh tokens
+        - google_client_secret.json: the OAuth client credentials (Google's format)
+
+    We also write per-user copies under /data/.hermes/users/<google_id>/
+    for future multi-user HERMES_HOME switching when Discord/Telegram is added.
     """
-    skill_dir = (
-        Path(HERMES_HOME) / "users" / google_id
+    # Primary path — where the running Hermes gateway actually looks.
+    primary_dir = (
+        Path(HERMES_HOME) / ".hermes" / "skills" / "productivity"
+        / "google-workspace" / "scripts"
+    )
+    primary_dir.mkdir(parents=True, exist_ok=True)
+
+    # Per-user copy — for future multi-user support.
+    user_dir = (
+        Path(HERMES_HOME) / ".hermes" / "users" / google_id
         / "skills" / "productivity" / "google-workspace" / "scripts"
     )
-    skill_dir.mkdir(parents=True, exist_ok=True)
+    user_dir.mkdir(parents=True, exist_ok=True)
 
+    # google_token.json — the access/refresh token in google-auth-library format.
     google_token = {
         "token":         tokens.get("access_token", ""),
         "refresh_token": tokens.get("refresh_token", ""),
@@ -479,8 +492,25 @@ def _save_google_token(google_id: str, tokens: dict) -> None:
         "scopes":        GOOGLE_SCOPES.split(),
         "expiry":        tokens.get("expires_in", 3600),
     }
-    with open(skill_dir / "google_token.json", "w") as f:
-        json.dump(google_token, f, indent=2)
+
+    # google_client_secret.json — Google's OAuth client credential format.
+    # setup.py --check looks for this file to confirm credentials are present.
+    client_secret = {
+        "installed": {
+            "client_id":                   GOOGLE_CLIENT_ID,
+            "client_secret":               GOOGLE_CLIENT_SECRET,
+            "auth_uri":                    "https://accounts.google.com/o/oauth2/auth",
+            "token_uri":                   "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "redirect_uris":               [GOOGLE_REDIRECT_URI],
+        }
+    }
+
+    for skill_dir in (primary_dir, user_dir):
+        with open(skill_dir / "google_token.json", "w") as f:
+            json.dump(google_token, f, indent=2)
+        with open(skill_dir / "google_client_secret.json", "w") as f:
+            json.dump(client_secret, f, indent=2)
 
 
 async def api_google_login(request: Request) -> Response:
