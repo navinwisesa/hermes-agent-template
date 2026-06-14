@@ -468,21 +468,26 @@ def _save_google_token(google_id: str, tokens: dict) -> None:
     We also write per-user copies under /data/.hermes/users/<google_id>/
     for future multi-user HERMES_HOME switching when Discord/Telegram is added.
     """
-    # Primary path — where the running Hermes gateway actually looks.
-    primary_dir = (
-        Path(HERMES_HOME) / ".hermes" / "skills" / "productivity"
-        / "google-workspace" / "scripts"
-    )
+    # HERMES_HOME is /data/.hermes (set as Railway env var).
+    # setup.py --check expects google_token.json at: $HERMES_HOME/google_token.json
+    # i.e. /data/.hermes/google_token.json
+    hermes_root = Path(HERMES_HOME)
+    hermes_root.mkdir(parents=True, exist_ok=True)
+
+    # Also write into the skills scripts dir and per-user dir for completeness.
+    primary_dir = hermes_root / "skills" / "productivity" / "google-workspace" / "scripts"
     primary_dir.mkdir(parents=True, exist_ok=True)
 
-    # Per-user copy — for future multi-user support.
-    user_dir = (
-        Path(HERMES_HOME) / ".hermes" / "users" / google_id
-        / "skills" / "productivity" / "google-workspace" / "scripts"
-    )
+    user_dir = hermes_root / "users" / google_id / "skills" / "productivity" / "google-workspace" / "scripts"
     user_dir.mkdir(parents=True, exist_ok=True)
 
     # google_token.json — the access/refresh token in google-auth-library format.
+    # Compute expiry as an ISO 8601 UTC datetime string — setup.py --check calls
+    # .rstrip() on this field so it must be a string, not an int.
+    expires_in = tokens.get("expires_in", 3600)
+    expiry_dt  = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=int(expires_in))
+    expiry_str = expiry_dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
     google_token = {
         "token":         tokens.get("access_token", ""),
         "refresh_token": tokens.get("refresh_token", ""),
@@ -490,7 +495,7 @@ def _save_google_token(google_id: str, tokens: dict) -> None:
         "client_id":     GOOGLE_CLIENT_ID,
         "client_secret": GOOGLE_CLIENT_SECRET,
         "scopes":        GOOGLE_SCOPES.split(),
-        "expiry":        tokens.get("expires_in", 3600),
+        "expiry":        expiry_str,
     }
 
     # google_client_secret.json — Google's OAuth client credential format.
@@ -512,10 +517,7 @@ def _save_google_token(google_id: str, tokens: dict) -> None:
         with open(skill_dir / "google_client_secret.json", "w") as f:
             json.dump(client_secret, f, indent=2)
 
-    # setup.py --check looks for the token here: /data/.hermes/google_token.json
-    # Write it to that flat root location as well.
-    hermes_root = Path(HERMES_HOME) / ".hermes"
-    hermes_root.mkdir(parents=True, exist_ok=True)
+    # Write to root HERMES_HOME — this is the primary location setup.py --check reads.
     with open(hermes_root / "google_token.json", "w") as f:
         json.dump(google_token, f, indent=2)
     with open(hermes_root / "google_client_secret.json", "w") as f:
