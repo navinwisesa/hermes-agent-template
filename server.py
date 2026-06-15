@@ -525,8 +525,43 @@ def _save_google_token(google_id: str, tokens: dict) -> None:
         json.dump(client_secret, f, indent=2)
 
 
+def _user_mappings_path() -> Path:
+    """Path to the platform user → google_id mapping file."""
+    return Path(HERMES_HOME) / "user_mappings.json"
+
+
+def _load_user_mappings() -> dict:
+    """Load platform user → google_id mappings. Returns {} if file missing."""
+    path = _user_mappings_path()
+    if not path.exists():
+        return {}
+    with open(path) as f:
+        return json.load(f)
+
+
+def _save_user_mapping(platform: str, platform_user_id: str, google_id: str) -> None:
+    """Persist a platform:user_id → google_id mapping.
+
+    Key format: "<platform>:<platform_user_id>"  e.g. "discord:1036621467502252164"
+    This lets Kosha look up the right Google token for any user on any channel.
+    """
+    mappings = _load_user_mappings()
+    key = f"{platform}:{platform_user_id}"
+    mappings[key] = {
+        "google_id":  google_id,
+        "linked_at":  datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    with open(_user_mappings_path(), "w") as f:
+        json.dump(mappings, f, indent=2)
+
+
 async def api_google_login(request: Request) -> Response:
-    """Initiate Google OAuth flow: generate state, store in session, redirect to Google."""
+    """Initiate Google OAuth flow: generate state, store in session, redirect to Google.
+
+    Accepts optional query params to bind the OAuth result to a platform user:
+        ?platform=discord&user_id=1036621467502252164
+    These are stored in the session and saved to user_mappings.json after callback.
+    """
     if not GOOGLE_CLIENT_ID:
         return JSONResponse(
             {"error": "GOOGLE_CLIENT_ID is not configured. Set it as a Railway environment variable."},
@@ -535,6 +570,13 @@ async def api_google_login(request: Request) -> Response:
 
     state = secrets.token_urlsafe(32)
     request.session["oauth_state"] = state
+
+    # Optionally bind to a platform user so the mapping is saved after OAuth.
+    platform        = request.query_params.get("platform", "")
+    platform_user_id = request.query_params.get("user_id", "")
+    if platform and platform_user_id:
+        request.session["oauth_platform"]         = platform
+        request.session["oauth_platform_user_id"] = platform_user_id
 
     params = {
         "client_id":     GOOGLE_CLIENT_ID,
@@ -599,6 +641,15 @@ async def auth_callback(request: Request) -> Response:
 
     # 5. Store google_id in the session so the agent knows who this browser belongs to.
     request.session["google_id"] = google_id
+
+    # 5b. If this OAuth was initiated from a platform channel (Discord/WhatsApp),
+    #     save the platform:user_id → google_id mapping so kosha_auth.py can find
+    #     the right token for this user on future messages.
+    platform         = request.session.pop("oauth_platform", "")
+    platform_user_id = request.session.pop("oauth_platform_user_id", "")
+    if platform and platform_user_id:
+        _save_user_mapping(platform, platform_user_id, google_id)
+
     request.session.pop("oauth_state", None)
 
     # 6. Show a confirmation page so the user knows it worked and can return to chat.
