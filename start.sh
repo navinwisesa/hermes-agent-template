@@ -48,4 +48,10 @@ fi
 # container), so removing the file unconditionally is safe.
 rm -f /data/.hermes/gateway.pid
 
+# Deploy kosha_auth.py into the google-workspace skill scripts directory so
+# Kosha can call it for multi-user token switching. Copied every boot so it
+# stays in sync with the repo version even after volume-only redeploys.
+mkdir -p /data/.hermes/skills/productivity/google-workspace/scripts
+cp /app/kosha_auth.py /data/.hermes/skills/productivity/google-workspace/scripts/kosha_auth.py
+
 exec python /app/server.py
