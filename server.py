@@ -69,12 +69,12 @@ PAIRING_TTL = 3600
 GOOGLE_CLIENT_ID     = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI  = os.environ.get("GOOGLE_REDIRECT_URI", "/auth/callback")
-# Scopes Kosha needs: calendar (read), tasks, gmail (full read).
+# Scopes Kosha needs: calendar (full — read + write/delete with confirmation), tasks, gmail (full read).
 GOOGLE_SCOPES = " ".join([
     "openid",
     "email",
     "profile",
-    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/gmail.readonly",
 ])
