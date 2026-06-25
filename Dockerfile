@@ -69,6 +69,8 @@ RUN mkdir -p /data/.hermes
 
 COPY server.py /app/server.py
 COPY kosha_auth.py /app/kosha_auth.py
+COPY skills/ /app/skills/
+COPY kosha/ /app/kosha/
 COPY templates/ /app/templates/
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
