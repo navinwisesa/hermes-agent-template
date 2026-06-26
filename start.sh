@@ -53,6 +53,7 @@ rm -f /data/.hermes/gateway.pid
 # stays in sync with the repo version even after volume-only redeploys.
 mkdir -p /data/.hermes/skills/productivity/google-workspace/scripts
 cp /app/kosha_auth.py /data/.hermes/skills/productivity/google-workspace/scripts/kosha_auth.py
+cp /app/kosha_health_fetch.py /data/.hermes/skills/productivity/google-workspace/scripts/kosha_health_fetch.py
 cp /app/skills/kosha_health.md /data/.hermes/skills/kosha_health.md
 
 exec python /app/server.py
